@@ -2,44 +2,44 @@ from flask import Flask, request, send_file
 import subprocess
 import os
 import shutil
+import uuid
 
 app = Flask(__name__)
 
-@app.route("/stitch", methods=["POST"])
-def stitch_images():
+@app.route("/stitch_videos", methods=["POST"])
+def stitch_videos():
     data = request.json
-    urls = data.get("images", [])
+    urls = data.get("videos", [])
 
     if not urls:
-        return {"error": "No images provided"}, 400
+        return {"error": "No video URLs provided"}, 400
 
-    # Create working folder
-    workdir = "/app/images"
-    if os.path.exists(workdir):
-        shutil.rmtree(workdir)
+    # Unique working directory for this request
+    workdir = f"/app/videos_{uuid.uuid4().hex}"
     os.makedirs(workdir, exist_ok=True)
 
-    # Download images sequentially
-    for i, url in enumerate(urls):
-        filename = os.path.join(workdir, f"img{i+1:03}.png")
-        subprocess.run(["wget", "-O", filename, url], check=True)
+    # Download videos sequentially
+    concat_file = os.path.join(workdir, "files.txt")
+    with open(concat_file, "w") as f:
+        for i, url in enumerate(urls):
+            video_path = os.path.join(workdir, f"clip{i+1:03}.mp4")
+            subprocess.run(["wget", "-O", video_path, url], check=True)
+            f.write(f"file '{video_path}'\n")
 
-    # Output video path
-    output_path = "/app/output.mp4"
+    # Output path
+    output_path = f"/app/output_{uuid.uuid4().hex}.mp4"
 
-    # Stitch images into video (3 seconds per image)
+    # Concatenate videos (re-encode to normalize)
     subprocess.run([
         "ffmpeg",
-        "-framerate", "1/3",
-        "-i", os.path.join(workdir, "img%03d.png"),
-        "-c:v", "libx264",
-        "-preset", "ultrafast",
-        "-r", "30",
-        "-pix_fmt", "yuv420p",
+        "-f", "concat", "-safe", "0",
+        "-i", concat_file,
+        "-c:v", "libx264", "-preset", "ultrafast",
+        "-r", "30", "-pix_fmt", "yuv420p",
         output_path
     ], check=True)
 
-    # Cleanup images folder
+    # Cleanup temporary files
     shutil.rmtree(workdir)
 
     return send_file(output_path, as_attachment=True)
